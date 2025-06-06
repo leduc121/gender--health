@@ -14,7 +14,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Random;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("/api/admin/users")
@@ -32,6 +34,8 @@ public class AdminAPI {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    private static final Pattern PHONE_PATTERN = Pattern.compile("^(?:\\+84|0)\\d{9,10}$");
+
     // CRUD: Create (dành cho admin, khác với register)
     @PostMapping("/create")
     @PreAuthorize("hasRole('ADMIN')")
@@ -41,12 +45,30 @@ public class AdminAPI {
             return ResponseEntity.badRequest().body("Email already exists");
         }
 
+        //kiem tra so dien thoai
+        if (userDTO.getPhone() == null || userDTO.getPhone().isEmpty()) {
+            return ResponseEntity.badRequest().body("Lỗi : Số điện thoại không được để trống");
+        }
+        //kiểm tra định dạng phone
+
+        if (!PHONE_PATTERN.matcher(userDTO.getPhone()).matches()) {
+            return ResponseEntity.badRequest().body("Lỗi : Số điện thoại không hợp lệ");
+        }
+
         User user = new User();
         user.setId(UUID.randomUUID());
         user.setEmail(userDTO.getEmail());
         user.setPassword(passwordEncoder.encode(userDTO.getPassword())); // Mã hóa password
         user.setFull_name(userDTO.getFull_name());
-        user.setSlug(userDTO.getFull_name().toLowerCase().replace(" ", "-"));
+
+
+        String baseSlug = userDTO.getFull_name().toLowerCase().replace(" ", "-");
+        Random random = new Random();
+        int randomNumber = random.nextInt(1000);
+        String formattedNumber = String.format("%03d", randomNumber);
+        user.setSlug(baseSlug + "-" + formattedNumber);
+
+        user.setPhone(userDTO.getPhone());
 
         // Gán role nếu được chỉ định, nếu không gán role mặc định "customer"
         UUID roleId = userDTO.getRole_id();
@@ -125,12 +147,26 @@ public class AdminAPI {
             return ResponseEntity.badRequest().body("Email already exists");
         }
 
+        // Kiểm tra số điện thoại nếu được cung cấp
+        if (userDTO.getPhone() != null && !userDTO.getPhone().isEmpty()) {
+            if (!PHONE_PATTERN.matcher(userDTO.getPhone()).matches()) {
+                return ResponseEntity.badRequest().body("Lỗi: Số điện thoại không hợp lệ. Phải bắt đầu bằng +84 hoặc 0, theo sau là 9 hoặc 10 chữ số");
+            }
+            user.setPhone(userDTO.getPhone());
+        }
+
         user.setEmail(userDTO.getEmail());
         if (userDTO.getPassword() != null && !userDTO.getPassword().isEmpty()) {
             user.setPassword(passwordEncoder.encode(userDTO.getPassword())); // Mã hóa password mới
         }
         user.setFull_name(userDTO.getFull_name());
-        user.setSlug(userDTO.getFull_name().toLowerCase().replace(" ", "-"));
+
+        // Tạo slug với 3 số ngẫu nhiên
+        String baseSlug = userDTO.getFull_name().toLowerCase().replace(" ", "-");
+        Random random = new Random();
+        int randomNumber = random.nextInt(1000);
+        String formattedNumber = String.format("%03d", randomNumber);
+        user.setSlug(baseSlug + "-" + formattedNumber);
 
         // Cập nhật role nếu được chỉ định
         UUID roleId = userDTO.getRole_id();

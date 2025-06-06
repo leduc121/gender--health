@@ -40,6 +40,9 @@ public class User {
     private String address;
 
 
+
+
+
     @ManyToOne
     @JoinColumn(name = "role_id")
     private Role role;
