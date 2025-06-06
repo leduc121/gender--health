@@ -1,5 +1,10 @@
 package com.example.demo.api;
 
+
+import java.util.List;
+import java.util.ArrayList;
+import com.example.demo.dto.ErrorResponse;
+import com.example.demo.dto.ValidationError;
 import com.example.demo.dto.UserDTO;
 import com.example.demo.entity.RefreshToken;
 import com.example.demo.entity.Role;
@@ -47,44 +52,90 @@ public class UserAPI {
     private PasswordEncoder passwordEncoder;
 
     private static final Pattern  PHONE_PATTERN = Pattern.compile("^(?:\\+84|0)\\d{9,10}$");
+    private static final Pattern FULL_NAME_PATTERN = Pattern.compile("^[A-Za-zÀ-ỹ0-9]+( [A-Za-zÀ-ỹ0-9]+)*$");
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[\\w-\\.]+@([\\w-]+\\.)+[\\w-]{2,4}$");
+
+
+
+    //kiem tra xem trong full name co chua icon dac biet khong
+
+    private boolean containsEmoji(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            int codePoint = text.codePointAt(i);
+            if ((codePoint >= 0x1F600 && codePoint <= 0x1F64F) || // Emoticons
+                    (codePoint >= 0x1F300 && codePoint <= 0x1F5FF) || // Misc Symbols and Pictographs
+                    (codePoint >= 0x1F680 && codePoint <= 0x1F6FF) || // Transport and Map Symbols
+                    (codePoint >= 0x1F1E6 && codePoint <= 0x1F1FF)) { // Flags
+                return true;
+            }
+        }
+        return false;
+    }
+
+
 
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody UserDTO userDTO) {
-        // Kiểm tra email đã tồn tại
-        if (userRepository.findByEmail(userDTO.getEmail()) != null) {
-            return ResponseEntity.badRequest().body("Email already exists");
+        List<ValidationError> errors = new ArrayList<>();
+
+        //kiem tra email
+        if (userDTO.getEmail() == null || userDTO.getEmail().isEmpty()) {
+            errors.add(new ValidationError("email", "Email không được để trống"));
+        } else {
+            if (userDTO.getEmail().contains(" ")) {
+                errors.add(new ValidationError("email", "Email không được chứa khoảng trắng"));
+            } else if (!EMAIL_PATTERN.matcher(userDTO.getEmail()).matches()) {
+                errors.add(new ValidationError("email", "Email không hợp lệ"));
+            } else if (userRepository.findByEmail(userDTO.getEmail()) != null) {
+                errors.add(new ValidationError("email", "Email đã tồn tại"));
+            }
         }
 
-        //kiem tra so dien thoai
+        // kiem tra full name
+        if (userDTO.getFull_name() == null || userDTO.getFull_name().isEmpty()) {
+            errors.add(new ValidationError("full_name", "Tên không được để trống"));
+        } else {
+            String trimmedName = userDTO.getFull_name().trim();
+            if (!trimmedName.equals(userDTO.getFull_name())) {
+                errors.add(new ValidationError("full_name", "Tên không được chứa khoảng trắng ở đầu hoặc cuối"));
+            } else if (!FULL_NAME_PATTERN.matcher(userDTO.getFull_name()).matches()) {
+                errors.add(new ValidationError("full_name", "Tên chỉ được chứa chữ cái, số và khoảng trắng giữa các từ"));
+            } else if (containsEmoji(userDTO.getFull_name())) {
+                errors.add(new ValidationError("full_name", "Tên không được chứa icon hoặc emoji"));
+            }
+        }
+
+        //kiem tra sdt
         if (userDTO.getPhone() == null || userDTO.getPhone().isEmpty()) {
-            return ResponseEntity.badRequest().body("Lỗi : Số điện thoại không được để trống");
-        }
-        //kiểm tra định dạng phone
-
-        if (!PHONE_PATTERN.matcher(userDTO.getPhone()).matches()) {
-            return ResponseEntity.badRequest().body("Lỗi : Số điện thoại không hợp lệ");
+            errors.add(new ValidationError("phone", "Số điện thoại không được để trống"));
+        } else if (!PHONE_PATTERN.matcher(userDTO.getPhone()).matches()) {
+            errors.add(new ValidationError("phone", "Số điện thoại không hợp lệ. Phải bắt đầu bằng +84 hoặc 0, theo sau là 9 hoặc 10 chữ số"));
         }
 
+        //kiem tra pass
+        if (userDTO.getPassword() == null || userDTO.getPassword().isEmpty()) {
+            errors.add(new ValidationError("password", "Mật khẩu không được để trống"));
+        }
 
+        //response lỗi
+        if (!errors.isEmpty()) {
+            return ResponseEntity.badRequest().body(new ErrorResponse(errors));
+        }
 
         User user = new User();
         user.setId(UUID.randomUUID());
         user.setEmail(userDTO.getEmail());
-        user.setPassword(passwordEncoder.encode(userDTO.getPassword())); // Mã hóa password
+        user.setPassword(passwordEncoder.encode(userDTO.getPassword()));
         user.setFull_name(userDTO.getFull_name());
 
-
-        //tạo slug nếu có những customer trùng name
-
-        String baseSlug = userDTO.getFull_name().toLowerCase().replace(" ","-");
+        // slug
+        String baseSlug = userDTO.getFull_name().toLowerCase().replace(" ", "-");
         Random random = new Random();
         int randomNumber = random.nextInt(1000);
-        String formattedNumber = String.format("%03d",randomNumber);
+        String formattedNumber = String.format("%03d", randomNumber);
         user.setSlug(baseSlug + "-" + formattedNumber);
 
         user.setPhone(userDTO.getPhone());
-
-
 
         // Gán role mặc định là "customer" nếu không chỉ định role_id
         UUID roleId = userDTO.getRole_id();
@@ -93,10 +144,10 @@ public class UserAPI {
             role = roleRepository.findById(roleId)
                     .orElse(null);
             if (role == null) {
-                return ResponseEntity.badRequest().body("Lỗi: Role với ID " + roleId + " không tồn tại");
+                errors.add(new ValidationError("role_id", "Role với ID " + roleId + " không tồn tại"));
+                return ResponseEntity.badRequest().body(new ErrorResponse(errors));
             }
         } else {
-            // Tìm role "customer" mặc định
             role = roleRepository.findByName("customer")
                     .orElseGet(() -> {
                         Role defaultRole = new Role();
@@ -108,7 +159,7 @@ public class UserAPI {
         }
         user.setRole(role);
 
-        // Lưu user vào database
+        //Lưu user vào db
         userRepository.save(user);
         return ResponseEntity.ok("User registered successfully");
     }
